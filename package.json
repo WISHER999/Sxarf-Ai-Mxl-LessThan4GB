@@ -1,0 +1,100 @@
+{
+  "name": "smollm2-mlx-chat",
+  "version": "2.0.0",
+  "description": "Local AI chat for Apple Silicon macOS and Windows x64",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "server": "venv/bin/python server/server.py",
+    "check": "node --check main.js && node --check preload.js",
+    "test": "venv/bin/python -m unittest discover -s server -p 'test_*.py' -v",
+    "bench": "venv/bin/python server/bench.py",
+    "build": "electron-builder --mac",
+    "build:win": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.sxarf.ai",
+    "productName": "Sxarf AI",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "package.json",
+      "icon/**",
+      "node_modules/katex/**",
+      "!**/*.bak",
+      "!**/*.bak-*",
+      "!**/*.pyc",
+      "!**/__pycache__/**",
+      "!**/.DS_Store",
+      "!**/test/**",
+      "!**/tests/**",
+      "!**/example/**",
+      "!**/examples/**",
+      "!venv/**",
+      "!server/**",
+      "!first_time_app.sh",
+      "!setup.sh",
+      "!choose-plan.sh",
+      "!apply_edits.py",
+      "!README.md",
+      "!*_SETUP.md"
+    ],
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "server",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.bak",
+          "!**/*.bak-*",
+          "!**/test_*.py",
+          "!**/bench_*.py"
+        ]
+      },
+      {
+        "from": "requirements.txt",
+        "to": "requirements.txt"
+      },
+      {
+        "from": "requirements-windows.txt",
+        "to": "requirements-windows.txt"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "icon/icon.icns",
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Sxarf AI uses your microphone to transcribe voice messages locally."
+      }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "icon/icon.ico",
+      "artifactName": "${productName}-${version}-Setup-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "dependencies": {
+    "katex": "^0.19.1"
+  }
+}

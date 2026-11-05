@@ -2,6 +2,24 @@
 
 Setup: `./setup.sh` · Run: `npm start` · Tests: `npm test`
 
+## Windows build
+
+The Windows x64 build uses a separate CPU backend based on llama.cpp; MLX
+features remain on the Apple Silicon macOS backend. Windows users need 64-bit
+Python 3.10–3.12 and an internet connection. On first launch the app installs
+its Python dependencies and downloads the Llama 3.2 3B GGUF model.
+
+On Windows, install Node.js and Python, then run:
+
+```powershell
+npm install
+npm run build:win
+```
+
+The NSIS installer is written to `dist/`. Windows currently supports local
+text chat and CoCode; web research agents, image analysis, and local speech
+transcription are not included. Inference is CPU-only.
+
 The MLX server keeps one model resident at a time. Research specialists load
 sequentially and are released before the selected chat model is restored. The
 default chat model is Llama 3.2 3B; model choices are in the app's model menu.
