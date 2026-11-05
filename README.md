@@ -5,11 +5,11 @@ Setup: `./setup.sh` · Run: `npm start` · Tests: `npm test`
 ## Windows build
 
 The Windows x64 build uses a separate CPU backend based on llama.cpp; MLX
-features remain on the Apple Silicon macOS backend. Windows users need 64-bit
-Python 3.10–3.12 and an internet connection. On first launch the app installs
-its Python dependencies and downloads the Llama 3.2 3B GGUF model.
+features remain on the Apple Silicon macOS backend. On first launch the app
+downloads a verified private Python runtime, installs its dependencies, and
+downloads the Llama 3.2 3B GGUF model. An internet connection is required.
 
-On Windows, install Node.js and Python, then run:
+To build the installer from source, install Node.js and run:
 
 ```powershell
 npm install

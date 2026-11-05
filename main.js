@@ -51,6 +51,8 @@ const APP_RESOURCES = IS_PACKAGED
 // Packaged .app bundles are not a writable location.
 const SUPPORT_DIR = app.getPath("userData");
 const VENV_DIR = path.join(SUPPORT_DIR, "venv");
+const WINDOWS_PYTHON_DIR = path.join(SUPPORT_DIR, "python-3.12.10");
+const WINDOWS_PYTHON = path.join(WINDOWS_PYTHON_DIR, "python.exe");
 const VENV_PYTHON = IS_WINDOWS
   ? path.join(VENV_DIR, "Scripts", "python.exe")
   : path.join(VENV_DIR, "bin", "python");
@@ -1950,6 +1952,7 @@ function findPythonExecutable() {
       ], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
+        timeout: 10000,
         env: {
           ...process.env,
           PATH: IS_WINDOWS
@@ -1973,11 +1976,165 @@ function findPythonExecutable() {
     }
   }
 
+  if (IS_WINDOWS) return null;
+
   throw new Error(
-    IS_WINDOWS
-      ? "64-bit Python 3.10–3.12 was not found. Install Python from python.org, enable the Python launcher, then reopen Sxarf AI."
-      : "Python 3.10 or newer for Apple Silicon was not found. Install Python 3 from python.org or Homebrew, then reopen Sxarf AI."
+    "Python 3.10 or newer for Apple Silicon was not found. Install Python 3 from python.org or Homebrew, then reopen Sxarf AI."
   );
+}
+
+const WINDOWS_PYTHON_INSTALLER = {
+  url: "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe",
+  sha256: "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb",
+  size: 26964224,
+};
+
+function downloadWindowsPythonInstaller(destination) {
+  const maxRedirects = 5;
+
+  function download(url, redirectsRemaining) {
+    return new Promise((resolve, reject) => {
+      const request = https.get(url, response => {
+        const status = response.statusCode || 0;
+        if ([301, 302, 303, 307, 308].includes(status)) {
+          const location = response.headers.location;
+          response.resume();
+          if (!location || redirectsRemaining <= 0) {
+            reject(new Error("Python installer download exceeded redirect limit."));
+            return;
+          }
+          const nextUrl = new URL(location, url);
+          if (
+            nextUrl.protocol !== "https:" ||
+            !["python.org", "www.python.org"].includes(nextUrl.hostname)
+          ) {
+            reject(new Error("Python installer redirected to an untrusted host."));
+            return;
+          }
+          download(nextUrl, redirectsRemaining - 1).then(resolve, reject);
+          return;
+        }
+
+        if (status !== 200) {
+          response.resume();
+          reject(new Error(`Python installer download failed (HTTP ${status}).`));
+          return;
+        }
+
+        const expectedSize = WINDOWS_PYTHON_INSTALLER.size;
+        const hash = crypto.createHash("sha256");
+        let received = 0;
+        let nextProgress = 5;
+        const output = fs.createWriteStream(destination, { flags: "wx" });
+        response.on("data", chunk => {
+          received += chunk.length;
+          if (received > expectedSize) {
+            request.destroy(new Error("Downloaded Python installer exceeded its expected size."));
+            return;
+          }
+          hash.update(chunk);
+          const percent = Math.floor((received / expectedSize) * 100);
+          if (percent >= nextProgress) {
+            reportSetupProgress(`Downloading verified Python runtime (${percent}%)...`);
+            nextProgress = Math.min(100, percent + 5);
+          }
+        });
+        response.pipe(output);
+
+        const fail = error => {
+          output.destroy();
+          fs.promises.unlink(destination).catch(() => {});
+          reject(error);
+        };
+        request.setTimeout(30000, () => {
+          request.destroy(new Error("Python installer download timed out."));
+        });
+        request.once("error", fail);
+        response.once("error", fail);
+        response.once("aborted", () => fail(new Error("Python installer download was interrupted.")));
+        output.once("error", fail);
+        output.once("close", () => {
+          if (!output.writableFinished) {
+            fail(new Error("Python installer download did not finish writing."));
+          }
+        });
+        output.once("finish", () => {
+          const actualHash = hash.digest("hex");
+          if (
+            received !== expectedSize ||
+            actualHash !== WINDOWS_PYTHON_INSTALLER.sha256
+          ) {
+            fail(new Error("Downloaded Python installer failed its integrity check."));
+            return;
+          }
+          resolve();
+        });
+      });
+
+      request.once("error", reject);
+    });
+  }
+
+  return download(new URL(WINDOWS_PYTHON_INSTALLER.url), maxRedirects);
+}
+
+async function installWindowsPython() {
+  if (fs.existsSync(WINDOWS_PYTHON)) {
+    return { command: WINDOWS_PYTHON, args: [] };
+  }
+
+  const installerPath = path.join(
+    SUPPORT_DIR,
+    "python-3.12.10-amd64-installer.exe"
+  );
+  try {
+    try {
+      const staleInstaller = fs.lstatSync(installerPath);
+      if (staleInstaller.isSymbolicLink() || !staleInstaller.isFile()) {
+        throw new Error("Unsafe cached Python installer path.");
+      }
+      fs.unlinkSync(installerPath);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await downloadWindowsPythonInstaller(installerPath);
+
+    reportSetupProgress("Installing the private Python runtime...");
+    await runBootstrapCommand(
+      installerPath,
+      [
+        "/quiet",
+        "InstallAllUsers=0",
+        `TargetDir=${WINDOWS_PYTHON_DIR}`,
+        "Include_launcher=0",
+        "Include_pip=1",
+        "Include_test=0",
+        "Include_doc=0",
+        "Include_dev=0",
+        "Include_tcltk=0",
+        "Include_tools=0",
+        "PrependPath=0",
+        "Shortcuts=0",
+      ],
+      "Installing the private Python runtime...",
+      process.env
+    );
+
+    if (!fs.existsSync(WINDOWS_PYTHON)) {
+      throw new Error("Python installer completed without creating python.exe.");
+    }
+    execFileSync(WINDOWS_PYTHON, [
+      "-c",
+      "import platform,sys; assert sys.version_info[:2] == (3,12); assert platform.machine().lower() in ('amd64','x86_64')",
+    ], { stdio: "ignore" });
+    return { command: WINDOWS_PYTHON, args: [] };
+  } finally {
+    await fs.promises.unlink(installerPath).catch(error => {
+      if (error.code !== "ENOENT") {
+        console.warn("Could not remove the Python installer cache:", error);
+      }
+    });
+  }
 }
 
 function runBootstrapCommand(command, args, label, env) {
@@ -2073,7 +2230,10 @@ async function runFirstLaunchSetup() {
       ? process.env.PATH || ""
       : ["/opt/homebrew/bin", "/usr/local/bin", process.env.PATH || ""].join(path.delimiter),
   };
-  const python = findPythonExecutable();
+  let python = findPythonExecutable();
+  if (IS_WINDOWS && !python) {
+    python = await installWindowsPython();
+  }
 
   if (!fs.existsSync(VENV_PYTHON)) {
     reportSetupProgress("Setting up local Python environment...");
@@ -2344,7 +2504,7 @@ async function startApplication() {
       `${IS_WINDOWS ? "Windows CPU" : "MLX"} Backend Error`,
       `${error.message}\n\n` +
       (IS_WINDOWS
-        ? "Check the first-launch setup log, install 64-bit Python 3.10–3.12, and confirm the local model can be downloaded."
+        ? "Check your internet connection and first-launch setup log. Sxarf AI downloads its verified Python runtime, dependencies, and local model during setup."
         : "Check the first-launch setup log and confirm that the runtime contains mlx-lm, mlx-vlm, mlx-whisper, FastAPI, and Uvicorn.")
     );
 
