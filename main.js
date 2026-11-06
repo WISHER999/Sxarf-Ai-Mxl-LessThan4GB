@@ -22,6 +22,24 @@ const crypto = require("crypto");
 app.setName("Sxarf AI");
 app.setPath("userData", path.join(app.getPath("appData"), "Sxarf AI"));
 
+const IS_WINDOWS = process.platform === "win32";
+const IS_WINE = IS_WINDOWS && Boolean(
+  process.env.WINEPREFIX ||
+  process.env.WINELOADERNOEXEC ||
+  process.env.WINEDLLPATH ||
+  process.env.CX_BOTTLE
+);
+
+if (IS_WINDOWS) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+  app.commandLine.appendSwitch("disable-features", "Vulkan,UseSkiaRenderer");
+}
+if (IS_WINE) {
+  app.commandLine.appendSwitch("no-sandbox");
+}
+
 // ============================================================
 // Application state and paths
 // ============================================================
@@ -41,7 +59,6 @@ let setupProgressText = "Starting Sxarf AI...";
 const SERVER_PORT = 8741;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 const IS_PACKAGED = app.isPackaged;
-const IS_WINDOWS = process.platform === "win32";
 
 const APP_RESOURCES = IS_PACKAGED
   ? process.resourcesPath
@@ -2358,13 +2375,67 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: !IS_WINE,
     },
   });
 
-  mainWindow.loadFile(
-    path.join(__dirname, "index.html")
-  );
+  const rendererLogPath = path.join(SUPPORT_DIR, "Logs", "renderer.log");
+  function logRenderer(message) {
+    try {
+      fs.mkdirSync(path.dirname(rendererLogPath), { recursive: true });
+      fs.appendFileSync(
+        rendererLogPath,
+        `${new Date().toISOString()} ${message}\n`,
+        "utf8"
+      );
+    } catch (error) {
+      console.error("Could not write renderer diagnostics:", error);
+    }
+  }
+
+  mainWindow.webContents.on("console-message", (_event, details) => {
+    logRenderer(
+      `console level=${details.level} source=${details.sourceId}:${details.lineNumber} ${details.message}`
+    );
+  });
+  mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
+    logRenderer(`preload error path=${preloadPath} ${error.stack || error.message}`);
+  });
+  mainWindow.webContents.on("did-finish-load", () => {
+    logRenderer(
+      `loaded url=${mainWindow.webContents.getURL()} title=${mainWindow.webContents.getTitle()}`
+    );
+    mainWindow.webContents.executeJavaScript(
+      "JSON.stringify({readyState:document.readyState,bodyLength:document.body?.innerText.length,background:getComputedStyle(document.body).backgroundColor,devicePixelRatio:window.devicePixelRatio})"
+    ).then(state => logRenderer(`renderer state ${state}`))
+      .catch(error => logRenderer(`renderer inspection failed: ${error.message}`));
+  });
+  mainWindow.webContents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
+    logRenderer(
+      `load failed mainFrame=${isMainFrame} code=${code} description=${description} url=${url}`
+    );
+    if (isMainFrame && code !== -3) {
+      dialog.showErrorBox(
+        "Sxarf AI could not load its interface",
+        `The app could not open its packaged interface (${description}, ${code}).\n\nDiagnostic log: ${rendererLogPath}`
+      );
+    }
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    logRenderer(
+      `renderer exited reason=${details.reason} exitCode=${details.exitCode}`
+    );
+    if (!quitting) {
+      dialog.showErrorBox(
+        "Sxarf AI interface stopped",
+        `The interface process stopped (${details.reason}, exit code ${details.exitCode}).\n\nDiagnostic log: ${rendererLogPath}`
+      );
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, "index.html")).catch(error => {
+    logRenderer(`loadFile rejected: ${error.stack || error.message}`);
+  });
 
   mainWindow.once("ready-to-show", () => {
     if (

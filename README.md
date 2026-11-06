@@ -19,6 +19,9 @@ npm run build:win
 The NSIS installer is written to `dist/`. Windows currently supports local
 text chat and CoCode; web research agents, image analysis, and local speech
 transcription are not included. Inference is CPU-only.
+The app disables GPU acceleration on Windows for compatibility with Wine-based
+environments such as CrossOver. Renderer startup failures are logged to
+`%APPDATA%\Sxarf AI\Logs\renderer.log`.
 
 The MLX server keeps one model resident at a time. Research specialists load
 sequentially and are released before the selected chat model is restored. The

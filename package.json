@@ -1,6 +1,6 @@
 {
   "name": "smollm2-mlx-chat",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Local AI chat for Apple Silicon macOS and Windows x64",
   "main": "main.js",
   "scripts": {
