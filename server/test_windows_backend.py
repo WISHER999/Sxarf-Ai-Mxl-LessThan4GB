@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 import threading
 import unittest
 from unittest.mock import patch
@@ -28,6 +30,34 @@ class WindowsBackendTests(unittest.TestCase):
         result = server_windows.get_models()
         self.assertEqual([server_windows.MODEL_ID], [m["id"] for m in result["models"]])
         self.assertEqual(server_windows.MODEL_ID, result["active"])
+
+    def test_prepare_model_path_materializes_a_regular_model_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cached_path = os.path.join(directory, "cached-model")
+            model_dir = os.path.join(directory, "models")
+            with open(cached_path, "wb") as model_file:
+                model_file.write(b"test model")
+
+            model_path = server_windows.prepare_model_path(cached_path, model_dir)
+
+            self.assertEqual(server_windows.MODEL_FILE, os.path.basename(model_path))
+            self.assertTrue(os.path.isfile(model_path))
+            self.assertFalse(os.path.islink(model_path))
+            with open(model_path, "rb") as model_file:
+                self.assertEqual(b"test model", model_file.read())
+
+    def test_prepare_model_path_copies_when_hard_links_are_unavailable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cached_path = os.path.join(directory, "cached-model")
+            model_dir = os.path.join(directory, "models")
+            with open(cached_path, "wb") as model_file:
+                model_file.write(b"test model")
+
+            with patch("server_windows.os.link", side_effect=OSError("unsupported")):
+                model_path = server_windows.prepare_model_path(cached_path, model_dir)
+
+            with open(model_path, "rb") as model_file:
+                self.assertEqual(b"test model", model_file.read())
 
     def test_stream_returns_text_and_final_stats(self):
         request = server_windows.ChatRequest(

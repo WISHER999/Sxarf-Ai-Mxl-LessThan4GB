@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -25,6 +26,29 @@ model = None
 model_status = "starting"
 model_error = None
 generation_lock = threading.Lock()
+
+
+def prepare_model_path(cached_path: str, model_dir: str) -> str:
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, MODEL_FILE)
+    if (
+        os.path.isfile(model_path)
+        and not os.path.islink(model_path)
+        and os.path.getsize(model_path) == os.path.getsize(cached_path)
+    ):
+        return model_path
+
+    temporary_path = f"{model_path}.tmp"
+    try:
+        try:
+            os.link(cached_path, temporary_path)
+        except OSError:
+            shutil.copyfile(cached_path, temporary_path)
+        os.replace(temporary_path, model_path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+    return model_path
 
 
 class Message(BaseModel):
@@ -54,12 +78,19 @@ def load_model():
         from huggingface_hub import hf_hub_download
         from llama_cpp import Llama
 
-        model_path = hf_hub_download(
+        cached_path = hf_hub_download(
             repo_id=MODEL_REPO,
             filename=MODEL_FILE,
             cache_dir=os.path.join(
                 os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")),
                 "hub",
+            ),
+        )
+        model_path = prepare_model_path(
+            cached_path,
+            os.path.join(
+                os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")),
+                "models",
             ),
         )
         model = Llama(

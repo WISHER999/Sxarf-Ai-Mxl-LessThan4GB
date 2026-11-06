@@ -22,6 +22,8 @@ transcription are not included. Inference is CPU-only.
 The app disables GPU acceleration on Windows for compatibility with Wine-based
 environments such as CrossOver. Renderer startup failures are logged to
 `%APPDATA%\Sxarf AI\Logs\renderer.log`.
+The downloaded model is materialized at a regular local path before loading to
+avoid model-cache symlink issues in Wine-based environments.
 
 The MLX server keeps one model resident at a time. Research specialists load
 sequentially and are released before the selected chat model is restored. The
